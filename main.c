@@ -7,6 +7,12 @@
 #include<time.h>
 #include<limits.h>
 
+//TODO 1 implement elipson equality 
+//TODO 2 Matrix Transpose
+//TODO 3 Hadamard Multiplication
+//TODO 4 Matrix Slices / Views
+//TODO 5 Element Wise Transformer Kernel
+
 typedef enum{
     Double,
     Int,
@@ -53,7 +59,7 @@ static inline MatrixResult matrix_create(MatrixType matrix_type,size_t rows,size
         matrix_size = sizeof(double);
     }
     else if(matrix_type == Int){
-        matrix_size = sizeof(int);
+        matrix_size = sizeof(int64_t);
     }
     else{
         matrix_size = 0;
@@ -74,8 +80,8 @@ static inline MatrixResult matrix_create(MatrixType matrix_type,size_t rows,size
     return result;
 }
 
-static inline void matrix_fill_int(Matrix matrix,int value){
-    int* restrict matrix_data_int = (int*)matrix.data;
+static inline void matrix_fill_int(Matrix matrix,int64_t value){
+    int64_t* restrict matrix_data_int = (int64_t*)matrix.data;
 
     for_each(i,matrix){
         matrix_data_int[i] = value;
@@ -83,8 +89,8 @@ static inline void matrix_fill_int(Matrix matrix,int value){
 
 }
 
-static inline void matrix_fill_random_int(Matrix matrix,int low,int high){
-    int* restrict matrix_data_int = (int*)matrix.data;
+static inline void matrix_fill_random_int(Matrix matrix,int64_t low,int64_t high){
+    int64_t* restrict matrix_data_int = (int64_t*)matrix.data;
 
     uint64_t range = (uint64_t)(int64_t)high - (uint64_t)(int64_t)low + 1;
 
@@ -122,34 +128,6 @@ static inline size_t get_linear_index(Matrix matrix,size_t row,size_t col){
 }
 
 
-static inline void matrix_print(const Matrix matrix){
-    if(matrix.type == Int){
-        int* restrict matrix_data_int = (int*)matrix.data;
-
-        for(size_t i = 0 ; i < matrix.rows ; ++i){
-            for(size_t j = 0 ; j < matrix.cols ; ++j){
-                printf("%3d ",matrix_data_int[get_linear_index(matrix,i,j)]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-    else if(matrix.type == Double){
-        double* restrict matrix_data_double = (double*)matrix.data;
-
-        for(size_t i = 0 ; i < matrix.rows ; ++i){
-            for(size_t j = 0 ; j < matrix.cols ; ++j){
-                printf("%.2f ",matrix_data_double[get_linear_index(matrix,i,j)]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-    else{
-        thread_panic("UnprintableMatrixError");
-    }
-
-}
 
 /* static const MatrixBinaryOpKernel matrix_add_kernels[] = {
     [Int]    = _matrix_add_int_kernel,
@@ -168,9 +146,9 @@ static inline void _matrix_add_int_kernel(
     const void* restrict _rhs,
     size_t   elements_count
 ){
-    int* restrict dst = (int*)_dst;
-    int* restrict lhs = (int*)_lhs;
-    int* restrict rhs = (int*)_rhs;
+    int64_t* restrict dst = (int64_t*)_dst;
+    int64_t* restrict lhs = (int64_t*)_lhs;
+    int64_t* restrict rhs = (int64_t*)_rhs;
 
     for(size_t i = 0 ; i < elements_count ; ++i)
         dst[i] = lhs[i] + rhs[i];
@@ -182,9 +160,9 @@ static inline void _matrix_sub_int_kernel(
     const void* restrict _rhs,
     size_t   elements_count
 ){
-    int* restrict dst = (int*)_dst;
-    int* restrict lhs = (int*)_lhs;
-    int* restrict rhs = (int*)_rhs;
+    int64_t* restrict dst = (int64_t*)_dst;
+    int64_t* restrict lhs = (int64_t*)_lhs;
+    int64_t* restrict rhs = (int64_t*)_rhs;
 
     for(size_t i = 0 ; i < elements_count ; ++i)
         dst[i] = lhs[i] - rhs[i];
@@ -198,19 +176,48 @@ static inline void _matrix_mul_int_kernel(
     size_t lhs_cols,
     size_t rhs_cols
 ){
-    int* restrict dst = (int*)_dst;
-    int* restrict lhs = (int*)_lhs;
-    int* restrict rhs = (int*)_rhs;
+    int64_t* restrict dst = (int64_t*)_dst;
+    int64_t* restrict lhs = (int64_t*)_lhs;
+    int64_t* restrict rhs = (int64_t*)_rhs;
 
     for(size_t i = 0 ; i < lhs_rows ; ++i){
         for(size_t j = 0 ; j < rhs_cols; ++j){
-            int sum = 0;
+            int64_t sum = 0;
             for(size_t k = 0 ; k < lhs_cols; ++k){
                 sum += lhs[i * lhs_cols + k] * rhs[k * rhs_cols + j];
             }
             dst[i * lhs_cols + j] = sum;
         }
     }
+}
+
+static inline void _matrix_clone_int_kernel(
+    void* restrict _dst,
+    const void* restrict _src,
+    size_t rows,
+    size_t cols 
+){
+    int64_t* restrict src_matrix_data = (int64_t*)_src;
+    int64_t* restrict dst_matrix_data = (int64_t*)_dst;
+        
+    for(size_t i = 0 ; i < rows * cols ; ++i){
+        dst_matrix_data[i] = src_matrix_data[i];
+    }
+}
+
+static inline void _matrix_print_int_kernel(
+    const void* restrict _lhs,
+    size_t lhs_rows,
+    size_t lhs_cols
+){
+    int64_t* lhs = (int64_t*)_lhs;
+    for(size_t i = 0 ; i < lhs_rows; ++i){
+        for(size_t j = 0 ; j < lhs_cols; ++j){
+            printf("%3ld ",lhs[i * lhs_cols + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 }
 
 static inline void _matrix_add_double_kernel(
@@ -262,11 +269,53 @@ static inline void _matrix_mul_double_kernel(
     }
 }
 
+static inline void _matrix_clone_double_kernel(
+    void* restrict _dst,
+    const void* restrict _src,
+    size_t rows,
+    size_t cols 
+){
+    double* restrict src_matrix_data = (double*)_src;
+    double* restrict dst_matrix_data = (double*)_dst;
+        
+    for(size_t i = 0 ; i < rows * cols ; ++i){
+        dst_matrix_data[i] = src_matrix_data[i];
+    }
+}
+
+static inline void _matrix_print_double_kernel(
+    const void* restrict _lhs,
+    size_t lhs_rows,
+    size_t lhs_cols
+){
+    double* lhs = (double*)_lhs;
+    for(size_t i = 0 ; i < lhs_rows; ++i){
+        for(size_t j = 0 ; j < lhs_cols; ++j){
+            printf("%7.2f ",lhs[i * lhs_cols + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
 typedef void(*MatrixBinaryOpKernel)( /* for addition and subtraction */
     void* restrict dst,
     const void* restrict lhs,
     const void* restrict rhs,
     size_t elements_count
+);
+
+typedef void(*MatrixUnaryOpGeneratingKernel)(
+    void* restrict dst,
+    const void* restrict lhs,
+    size_t rows,
+    size_t cols
+);
+
+typedef void(*MatrixUnaryOpNonGeneratingKernel)(
+    const void* restrict lhs,
+    size_t rows,
+    size_t cols
 );
 
 typedef void(*MatrixMultiplicationKernel)( /* for multiplication as the name suggests*/
@@ -279,24 +328,38 @@ typedef void(*MatrixMultiplicationKernel)( /* for multiplication as the name sug
 );
 
 typedef struct{
-    MatrixBinaryOpKernel add;
-    MatrixBinaryOpKernel sub;
-    MatrixMultiplicationKernel mul;
+    MatrixBinaryOpKernel             add;
+    MatrixBinaryOpKernel             sub;
+    MatrixMultiplicationKernel       mul;
+    MatrixUnaryOpGeneratingKernel    clone;
+    MatrixUnaryOpNonGeneratingKernel print;
     //MatrixMultiplicationKernel div; // Multiplying with inverse
 }MatrixVirtualTable;
 
 static const MatrixVirtualTable matrix_ops_lookup[] ={
     [Int] = {
-        .add = _matrix_add_int_kernel,
-        .sub = _matrix_sub_int_kernel,
-        .mul = _matrix_mul_int_kernel,
+        .add    = _matrix_add_int_kernel,
+        .sub    = _matrix_sub_int_kernel,
+        .mul    = _matrix_mul_int_kernel,
+        .clone  = _matrix_clone_int_kernel,
+        .print  = _matrix_print_int_kernel,
     },
     [Double] = {
-        .add = _matrix_add_double_kernel,
-        .sub = _matrix_sub_double_kernel,
-        .mul = _matrix_mul_double_kernel,
+        .add    = _matrix_add_double_kernel,
+        .sub    = _matrix_sub_double_kernel,
+        .mul    = _matrix_mul_double_kernel,
+        .clone  = _matrix_clone_double_kernel, 
+        .print  = _matrix_print_double_kernel,
     }
 };
+
+static inline MatrixErrors
+matrix_check_unary(const Matrix matrix){ // <- validates the matrix
+    if(matrix.type >= TypeCanary){
+        return UnsupportedTypeError;
+    }
+    return NoMatrixError;
+}
 
 static inline MatrixErrors 
 matrix_check_binary(const Matrix lhs,const Matrix rhs) /* <- types,dimensions validator function */
@@ -348,10 +411,49 @@ matrix_binary(const Matrix lhs,
 
     size_t element_count = lhs.rows * lhs.cols;
     
-    operation(result.matrix.data,lhs.data,rhs.data,element_count);
+    operation(result.matrix.data,
+        lhs.data,
+        rhs.data,
+        element_count);
     return result;
 }
 
+
+static inline MatrixResult 
+matrix_unary_generating(const Matrix matrix, /* <- an unary operation which takes self and nothing else which generates a new matrix,ex matrix_clone,matrix_transpose */
+             MatrixUnaryOpGeneratingKernel operation) 
+{
+    MatrixResult result;
+    let matrix_error = matrix_check_unary(matrix);
+
+    if (matrix_error != NoMatrixError){
+        result.ok = false;
+        result.matrix_error = matrix_error;
+        return result;
+    }
+
+    result = matrix_create(matrix.type,matrix.rows,matrix.cols);
+    if(result.ok == false)
+        return result;
+    
+    operation(result.matrix.data,
+        matrix.data,
+        matrix.rows,
+        matrix.cols);
+    return result;
+}
+
+static inline void 
+matrix_unary_non_generating(const Matrix matrix, /* <- an unary operation which doesnt generate anything,like matrix_print */
+             MatrixUnaryOpNonGeneratingKernel operation) 
+{
+    matrix_check_unary(matrix);
+
+    operation(
+        matrix.data,
+        matrix.rows,
+        matrix.cols);
+}
 
 static inline MatrixResult matrix_add(const Matrix lhs,const Matrix rhs){
     return matrix_binary(lhs,
@@ -388,36 +490,14 @@ static inline MatrixResult matrix_mul(const Matrix lhs,const Matrix rhs){
     return result;
 }
 
+static inline void matrix_print(const Matrix matrix){
+    matrix_unary_non_generating(matrix,
+        matrix_ops_lookup[matrix.type].print);
+}
+
 static inline MatrixResult matrix_clone(const Matrix matrix){
-    MatrixResult result;
-
-    result = matrix_create(matrix.type,matrix.rows,matrix.cols); 
-    if(result.ok == false){
-        return result;
-    }
-
-    result.matrix.rows = matrix.rows;
-    result.matrix.cols = matrix.cols;
-    result.matrix.type = matrix.type;
-
-    if(matrix.type == Int){
-        int* restrict matrix_data_int = (int*)matrix.data;
-        int* restrict result_matrix_int = (int*)result.matrix.data;
-        
-        for_each(i,matrix){
-            result_matrix_int[i] = matrix_data_int[i];
-        }
-        return result;
-    }
-    else{
-        double* restrict matrix_data_double = (double*)matrix.data;
-        double* restrict result_matrix_double = (double*)result.matrix.data;
-        
-        for_each(i,matrix){
-            result_matrix_double[i] = matrix_data_double[i];
-        }
-        return result; 
-    }
+   return matrix_unary_generating(matrix,
+        matrix_ops_lookup[matrix.type].clone);
 }
 
 static inline bool matrix_equal(const Matrix lhs, const Matrix rhs){
@@ -427,8 +507,8 @@ static inline bool matrix_equal(const Matrix lhs, const Matrix rhs){
         return false;
     
     if(lhs.type == Int){
-        int* restrict lhs_data_int = (int*)lhs.data;
-        int* restrict rhs_data_int = (int*)rhs.data;
+        int64_t* restrict lhs_data_int = (int64_t*)lhs.data;
+        int64_t* restrict rhs_data_int = (int64_t*)rhs.data;
         
         for(size_t i = 0 ; i < lhs.rows * lhs.cols ; ++i){
             if(lhs_data_int[i] != rhs_data_int[i]){
@@ -468,14 +548,14 @@ int main(int argc, char const *argv[]){
 
     drop Matrix m1 =  matrix_create(Int,3,3).matrix; // sort of like unwrap() <- use with extreme caution and never in production
     matrix_fill_int(m1,1);
-    drop Matrix m2 = matrix_clone(m1).matrix;
-
-    drop Matrix m3 = matrix_mul(m1,m2).matrix;
     
-    matrix_print(m1);
-    matrix_print(m2);
+    drop Matrix m2 = matrix_create(Double,2,3).matrix;
+    matrix_fill_random_double(m2,1.0,9.0);
 
-    matrix_print(m3);
+
+    drop Matrix m3 = matrix_clone(m1).matrix;
+    drop Matrix m4 = matrix_clone(m2).matrix;
+
     return 0;
 }
  
