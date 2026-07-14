@@ -10,6 +10,7 @@
 typedef enum{
     Double,
     Int,
+    TypeCanary, /* <- for type checking asserts */
 }MatrixType;
 
 typedef struct{
@@ -23,6 +24,8 @@ typedef enum {
     HeapAllocationError,
     InvalidDimensionError,
     TypeMismatchError,
+    UnsupportedTypeError,
+    NoMatrixError,
 }MatrixErrors;
 
 typedef struct{
@@ -38,6 +41,9 @@ static inline void thread_panic(const char* fmt){
 }
 
 #define for_each(idx,matrix) for(size_t idx = 0; idx < matrix.rows * matrix.cols ; ++idx)
+
+#define let __auto_type
+
 
 static inline MatrixResult matrix_create(MatrixType matrix_type,size_t rows,size_t cols){
     Matrix matrix;
@@ -122,7 +128,7 @@ static inline void matrix_print(const Matrix matrix){
 
         for(size_t i = 0 ; i < matrix.rows ; ++i){
             for(size_t j = 0 ; j < matrix.cols ; ++j){
-                printf("%d ",matrix_data_int[get_linear_index(matrix,i,j)]);
+                printf("%3d ",matrix_data_int[get_linear_index(matrix,i,j)]);
             }
             printf("\n");
         }
@@ -145,120 +151,241 @@ static inline void matrix_print(const Matrix matrix){
 
 }
 
-static inline MatrixResult matrix_add(const Matrix lhs,const Matrix rhs){
-    MatrixResult result;
-    Matrix       matrix;
+/* static const MatrixBinaryOpKernel matrix_add_kernels[] = {
+    [Int]    = _matrix_add_int_kernel,
+    [Double] = _matrix_add_double_kernel
+};
 
-    if((lhs.rows != rhs.rows) || (lhs.cols != rhs.cols)){
-        result.ok = false;
-        result.matrix_error = InvalidDimensionError;
-        return result;
-    }
+static const MatrixBinaryOpKernel matrix_sub_kernels[] = {
+    [Int]    = _matrix_sub_int_kernel,
+    [Double] = _matrix_sub_double_kernel
+}; */
 
-    if(lhs.type != rhs.type){
-        result.ok = false;
-        result.matrix_error = TypeMismatchError;
-        return result;
-    }
 
-    if(lhs.type == Int){
-        int* restrict lhs_matrix_data_int = (int*)lhs.data;
-        int* restrict rhs_matrix_data_int = (int*)rhs.data;
+static inline void _matrix_add_int_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t   elements_count
+){
+    int* restrict dst = (int*)_dst;
+    int* restrict lhs = (int*)_lhs;
+    int* restrict rhs = (int*)_rhs;
 
-        MatrixResult internal_result = matrix_create(Int,lhs.rows,lhs.cols);
+    for(size_t i = 0 ; i < elements_count ; ++i)
+        dst[i] = lhs[i] + rhs[i];
+}
 
-        if(internal_result.ok == false){
-            return internal_result;
+static inline void _matrix_sub_int_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t   elements_count
+){
+    int* restrict dst = (int*)_dst;
+    int* restrict lhs = (int*)_lhs;
+    int* restrict rhs = (int*)_rhs;
+
+    for(size_t i = 0 ; i < elements_count ; ++i)
+        dst[i] = lhs[i] - rhs[i];
+}
+
+static inline void _matrix_mul_int_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t lhs_rows,
+    size_t lhs_cols,
+    size_t rhs_cols
+){
+    int* restrict dst = (int*)_dst;
+    int* restrict lhs = (int*)_lhs;
+    int* restrict rhs = (int*)_rhs;
+
+    for(size_t i = 0 ; i < lhs_rows ; ++i){
+        for(size_t j = 0 ; j < rhs_cols; ++j){
+            int sum = 0;
+            for(size_t k = 0 ; k < lhs_cols; ++k){
+                sum += lhs[i * lhs_cols + k] * rhs[k * rhs_cols + j];
+            }
+            dst[i * lhs_cols + j] = sum;
         }
-
-        matrix = internal_result.matrix;
-        int* restrict result_matrix_data_int = (int*)matrix.data;
-
-        for(size_t i = 0 ; i < lhs.rows * lhs.cols ; ++i){
-            result_matrix_data_int[i] = lhs_matrix_data_int[i] + rhs_matrix_data_int[i];            
-        }
-
-        result = internal_result;
-        return result;
-    }
-    else{
-        double* restrict lhs_matrix_data_double = (double*)lhs.data;
-        double* restrict rhs_matrix_data_double = (double*)rhs.data;
-
-        MatrixResult internal_result = matrix_create(Double,lhs.rows,lhs.cols);
-
-        if(internal_result.ok == false){
-            return internal_result;
-        }
-
-        matrix = internal_result.matrix;
-        double* restrict result_matrix_data_double = (double*)matrix.data;
-
-        for(size_t i = 0 ; i < lhs.rows * lhs.cols ; ++i){
-            result_matrix_data_double[i] = lhs_matrix_data_double[i] + rhs_matrix_data_double[i];            
-        }
-
-        result = internal_result;
-        return result;
     }
 }
 
-static inline MatrixResult matrix_sub(const Matrix lhs,const Matrix rhs){
+static inline void _matrix_add_double_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t   elements_count
+){
+    double* restrict dst = (double*)_dst;
+    double* restrict lhs = (double*)_lhs;
+    double* restrict rhs = (double*)_rhs;
+    for(size_t i = 0 ; i < elements_count ; ++i)
+        dst[i] = lhs[i] + rhs[i];
+}
+
+static inline void _matrix_sub_double_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t   elements_count
+){
+    double* restrict dst = (double*)_dst;
+    double* restrict lhs = (double*)_lhs;
+    double* restrict rhs = (double*)_rhs;
+    for(size_t i = 0 ; i < elements_count ; ++i)
+        dst[i] = lhs[i] - rhs[i];
+}
+
+static inline void _matrix_mul_double_kernel(
+    void* restrict _dst,
+    const void* restrict _lhs,
+    const void* restrict _rhs,
+    size_t lhs_rows,
+    size_t lhs_cols,
+    size_t rhs_cols
+){
+    double* restrict dst = (double*)_dst;
+    double* restrict lhs = (double*)_lhs;
+    double* restrict rhs = (double*)_rhs;
+
+    for(size_t i = 0 ; i < lhs_rows ; ++i){
+        for(size_t j = 0 ; j < rhs_cols; ++j){
+            double sum = 0;
+            for(size_t k = 0 ; k < lhs_cols; ++k){
+                sum += lhs[i * lhs_cols + k] * rhs[k * rhs_cols + j];
+            }
+            dst[i * lhs_cols + j] = sum;
+        }
+    }
+}
+
+typedef void(*MatrixBinaryOpKernel)( /* for addition and subtraction */
+    void* restrict dst,
+    const void* restrict lhs,
+    const void* restrict rhs,
+    size_t elements_count
+);
+
+typedef void(*MatrixMultiplicationKernel)( /* for multiplication as the name suggests*/
+    void* restrict dst,
+    const void* restrict lhs,
+    const void* restrict rhs,
+    size_t lhs_rows,
+    size_t lhs_cols,
+    size_t rhs_cols
+);
+
+typedef struct{
+    MatrixBinaryOpKernel add;
+    MatrixBinaryOpKernel sub;
+    MatrixMultiplicationKernel mul;
+    //MatrixMultiplicationKernel div; // Multiplying with inverse
+}MatrixVirtualTable;
+
+static const MatrixVirtualTable matrix_ops_lookup[] ={
+    [Int] = {
+        .add = _matrix_add_int_kernel,
+        .sub = _matrix_sub_int_kernel,
+        .mul = _matrix_mul_int_kernel,
+    },
+    [Double] = {
+        .add = _matrix_add_double_kernel,
+        .sub = _matrix_sub_double_kernel,
+        .mul = _matrix_mul_double_kernel,
+    }
+};
+
+static inline MatrixErrors 
+matrix_check_binary(const Matrix lhs,const Matrix rhs) /* <- types,dimensions validator function */
+{
+    if(lhs.rows != rhs.rows || lhs.cols != rhs.cols){
+        return InvalidDimensionError;
+    }
+    else if(lhs.type != rhs.type){
+        return TypeMismatchError;
+    }
+    else if(lhs.type >= TypeCanary || rhs.type >= TypeCanary){
+        return UnsupportedTypeError;
+    }
+    return NoMatrixError;
+}
+
+static inline MatrixErrors
+matrix_check_multiplication(const Matrix lhs,const Matrix rhs)
+{
+    if(lhs.cols != rhs.rows){
+        return InvalidDimensionError;
+    }
+    else if(lhs.type != rhs.type){
+        return TypeMismatchError;
+    }
+    else if(lhs.type >= TypeCanary || rhs.type >= TypeCanary){
+        return UnsupportedTypeError;
+    }
+    return NoMatrixError;
+}
+
+static inline MatrixResult
+matrix_binary(const Matrix lhs,
+              const Matrix rhs,
+              MatrixBinaryOpKernel operation)
+{
     MatrixResult result;
-    Matrix       matrix;
+    let err = matrix_check_binary(lhs,rhs);
 
-    if((lhs.rows != rhs.rows) || (lhs.cols != rhs.cols)){
+    if(err != NoMatrixError){   
         result.ok = false;
-        result.matrix_error = InvalidDimensionError;
+        result.matrix_error = err;
         return result;
     }
 
-    if(lhs.type != rhs.type){
+    result = matrix_create(lhs.type,lhs.rows,lhs.cols);
+    if(result.ok == false)
+        return result;
+
+    size_t element_count = lhs.rows * lhs.cols;
+    
+    operation(result.matrix.data,lhs.data,rhs.data,element_count);
+    return result;
+}
+
+
+static inline MatrixResult matrix_add(const Matrix lhs,const Matrix rhs){
+    return matrix_binary(lhs,
+        rhs,
+        matrix_ops_lookup[lhs.type].add);
+}
+
+static inline MatrixResult matrix_sub(const Matrix lhs,const Matrix rhs){
+    return matrix_binary(lhs,
+        rhs,
+        matrix_ops_lookup[lhs.type].sub);
+}
+
+static inline MatrixResult matrix_mul(const Matrix lhs,const Matrix rhs){
+    MatrixResult result;
+
+    let matrix_error = matrix_check_multiplication(lhs,rhs);
+    if(matrix_error != NoMatrixError){
         result.ok = false;
-        result.matrix_error = TypeMismatchError;
-        return result;
+        result.matrix_error = matrix_error;
+        return result;    
     }
-
-    if(lhs.type == Int){
-        int* restrict lhs_matrix_data_int = (int*)lhs.data;
-        int* restrict rhs_matrix_data_int = (int*)rhs.data;
-
-        MatrixResult internal_result = matrix_create(Int,lhs.rows,lhs.cols);
-
-        if(internal_result.ok == false){
-            return internal_result;
-        }
-
-        matrix = internal_result.matrix;
-        int* restrict result_matrix_data_int = (int*)matrix.data;
-
-        for(size_t i = 0 ; i < lhs.rows * lhs.cols ; ++i){
-            result_matrix_data_int[i] = lhs_matrix_data_int[i] - rhs_matrix_data_int[i];            
-        }
-
-        result = internal_result;
+    
+    result = matrix_create(lhs.type,lhs.rows,rhs.cols);
+    if(result.ok == false)
         return result;
-    }
-    else{
-        double* restrict lhs_matrix_data_double = (double*)lhs.data;
-        double* restrict rhs_matrix_data_double = (double*)rhs.data;
 
-        MatrixResult internal_result = matrix_create(Double,lhs.rows,lhs.cols);
+    matrix_ops_lookup[lhs.type].mul(result.matrix.data,
+        lhs.data,
+        rhs.data,
+        lhs.rows,
+        lhs.cols,rhs.cols);
 
-        if(internal_result.ok == false){
-            return internal_result;
-        }
-
-        matrix = internal_result.matrix;
-        double* restrict result_matrix_data_double = (double*)matrix.data;
-
-        for(size_t i = 0 ; i < lhs.rows * lhs.cols ; ++i){
-            result_matrix_data_double[i] = lhs_matrix_data_double[i] - rhs_matrix_data_double[i];            
-        }
-
-        result = internal_result;
-        return result;
-    }
+    return result;
 }
 
 static inline MatrixResult matrix_clone(const Matrix matrix){
@@ -333,28 +460,22 @@ static inline void matrix_cleanup(Matrix* restrict matrix){
 }
 
 
-
 #define drop __attribute__((cleanup(matrix_cleanup))) // automatically calls free when goes out of scope
 
 int main(int argc, char const *argv[]){
     (void)argc; (void) argv;
     srand(time(NULL));
 
-   
+    drop Matrix m1 =  matrix_create(Int,3,3).matrix; // sort of like unwrap() <- use with extreme caution and never in production
+    matrix_fill_int(m1,1);
+    drop Matrix m2 = matrix_clone(m1).matrix;
 
-    for(int i = 0 ; i < 100000000 ; ++i){
-        drop Matrix m1 =  matrix_create(Int,10,4).matrix; // sort of like unwrap() <- use with extreme caution and never in production
-        matrix_fill_random_int(m1,INT_MIN,INT_MAX);
-        drop Matrix m2 =  matrix_clone(m1).matrix;
+    drop Matrix m3 = matrix_mul(m1,m2).matrix;
+    
+    matrix_print(m1);
+    matrix_print(m2);
 
-        if(matrix_equal(m1,m2) == false){
-            matrix_print(m1);
-            matrix_print(m2);
-            fprintf(stderr,"Check for yourself buddy\n");
-            return 69;
-        }
-    }
-
+    matrix_print(m3);
     return 0;
 }
  
